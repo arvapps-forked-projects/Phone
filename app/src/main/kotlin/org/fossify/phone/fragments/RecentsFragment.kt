@@ -59,10 +59,9 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
     }
 
     override fun refreshItems(callback: (() -> Unit)?) {
-        val privateCursor = context?.getMyContactsCursor(false, true)
+        val privateCursor = context?.getMyContactsCursor(favoritesOnly = false, withPhoneNumbersOnly = true)
         val groupSubsequentCalls = context?.config?.groupSubsequentCalls ?: false
-        val querySize = allRecentCalls.size.coerceAtLeast(MIN_RECENTS_THRESHOLD)
-        RecentsHelper(context).getRecentCalls(groupSubsequentCalls, querySize) { recents ->
+        RecentsHelper(context).getRecentCalls(groupSubsequentCalls, MIN_RECENTS_THRESHOLD, allRecentCalls) { recents ->
             ContactsHelper(context).getContacts(showOnlyContactsWithNumbers = true) { contacts ->
                 val privateContacts = MyContactsContentProvider.getContacts(context, privateCursor)
 
@@ -71,6 +70,7 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
                     .hidePrivateContacts(privateContacts, SMT_PRIVATE in context.baseConfig.ignoredContactSources)
 
                 activity?.runOnUiThread {
+                    binding.progressIndicator.hide()
                     gotRecents(allRecentCalls)
                 }
             }
@@ -80,13 +80,13 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
     private fun gotRecents(recents: List<RecentCall>) {
         if (recents.isEmpty()) {
             binding.apply {
-                recentsPlaceholder.beVisible()
+                showOrHidePlaceholder(true)
                 recentsPlaceholder2.beGoneIf(context.hasPermission(PERMISSION_READ_CALL_LOG))
                 recentsList.beGone()
             }
         } else {
             binding.apply {
-                recentsPlaceholder.beGone()
+                showOrHidePlaceholder(false)
                 recentsPlaceholder2.beGone()
                 recentsList.beVisible()
             }
@@ -124,10 +124,9 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
     }
 
     private fun getMoreRecentCalls() {
-        val privateCursor = context?.getMyContactsCursor(false, true)
+        val privateCursor = context?.getMyContactsCursor(favoritesOnly = false, withPhoneNumbersOnly = true)
         val groupSubsequentCalls = context?.config?.groupSubsequentCalls ?: false
-        val querySize = allRecentCalls.size.plus(MIN_RECENTS_THRESHOLD)
-        RecentsHelper(context).getRecentCalls(groupSubsequentCalls, querySize) { recents ->
+        RecentsHelper(context).getRecentCalls(groupSubsequentCalls, MIN_RECENTS_THRESHOLD, allRecentCalls) { recents ->
             ContactsHelper(context).getContacts(showOnlyContactsWithNumbers = true) { contacts ->
                 val privateContacts = MyContactsContentProvider.getContacts(context, privateCursor)
 
@@ -159,7 +158,7 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
     }
 
     override fun onSearchClosed() {
-        binding.recentsPlaceholder.beVisibleIf(allRecentCalls.isEmpty())
+        showOrHidePlaceholder(allRecentCalls.isEmpty())
         recentsAdapter?.updateItems(allRecentCalls)
     }
 
@@ -171,8 +170,16 @@ class RecentsFragment(context: Context, attributeSet: AttributeSet) : MyViewPage
             it.name.startsWith(fixedText, true)
         }.toMutableList() as ArrayList<RecentCall>
 
-        binding.recentsPlaceholder.beVisibleIf(recentCalls.isEmpty())
+        showOrHidePlaceholder(recentCalls.isEmpty())
         recentsAdapter?.updateItems(recentCalls, fixedText)
+    }
+
+    private fun showOrHidePlaceholder(show: Boolean) {
+        if (show && !binding.progressIndicator.isVisible()) {
+            binding.recentsPlaceholder.beVisible()
+        } else {
+            binding.recentsPlaceholder.beGone()
+        }
     }
 }
 
