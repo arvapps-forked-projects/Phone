@@ -20,8 +20,10 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.ImageView
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.os.postDelayed
 import androidx.core.view.children
 import androidx.core.view.setPadding
+import androidx.core.view.updatePadding
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import org.fossify.commons.extensions.*
@@ -55,7 +57,6 @@ class CallActivity : SimpleActivity() {
     private var proximityWakeLock: PowerManager.WakeLock? = null
     private var screenOnWakeLock: PowerManager.WakeLock? = null
     private var callDuration = 0
-    private val callContactAvatarHelper by lazy { CallContactAvatarHelper(this) }
     private val callDurationHandler = Handler(Looper.getMainLooper())
     private var dragDownX = 0f
     private var stopAnimation = false
@@ -508,13 +509,17 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun findVisibleViewsUnderDialpad(): Sequence<Pair<View, Float>> {
-        return binding.ongoingCallHolder.children.map { it }
-            .filter { it.isVisible() }
+        return binding.ongoingCallHolder.children
+            .filter { it is ImageView && it.isVisible() }
             .map { view -> Pair(view, view.alpha) }
     }
 
     private fun showDialpad() {
         binding.dialpadWrapper.apply {
+            updatePadding(
+                bottom = binding.root.bottom - binding.callEnd.top + resources.getDimensionPixelSize(R.dimen.activity_margin)
+            )
+
             translationY = dialpadHeight
             alpha = 0f
             animate()
@@ -557,7 +562,7 @@ class CallActivity : SimpleActivity() {
         val isOnHold = CallManager.toggleHold()
         toggleButtonColor(binding.callToggleHold, isOnHold)
         binding.callToggleHold.contentDescription = getString(if (isOnHold) R.string.resume_call else R.string.hold_call)
-        binding.holdStatusLabel.beVisibleIf(isOnHold)
+        binding.holdStatusLabel.beInvisibleIf(!isOnHold)
     }
 
     private fun updateOtherPersonsInfo(avatarUri: String?) {
@@ -566,12 +571,13 @@ class CallActivity : SimpleActivity() {
         }
 
         binding.apply {
-            callerNameLabel.text = callContact!!.name.ifEmpty { getString(R.string.unknown_caller) }
-            if (callContact!!.number.isNotEmpty() && callContact!!.number != callContact!!.name) {
-                callerNumber.text = callContact!!.number
+            val (name, _, number, numberLabel) = callContact!!
+            callerNameLabel.text = name.ifEmpty { getString(R.string.unknown_caller) }
+            if (number.isNotEmpty() && number != name) {
+                callerNumber.text = number
 
-                if (callContact!!.numberLabel.isNotEmpty()) {
-                    callerNumber.text = "${callContact!!.number} - ${callContact!!.numberLabel}"
+                if (numberLabel.isNotEmpty()) {
+                    callerNumber.text = "$number - $numberLabel"
                 }
             } else {
                 callerNumber.beGone()
@@ -654,9 +660,9 @@ class CallActivity : SimpleActivity() {
                 callStatusLabel.text = getString(statusTextId)
             }
 
-            callManage.beVisibleIf(call.hasCapability(Call.Details.CAPABILITY_MANAGE_CONFERENCE))
-            setActionButtonEnabled(callSwap, state == Call.STATE_ACTIVE)
-            setActionButtonEnabled(callMerge, state == Call.STATE_ACTIVE)
+            callManage.beVisibleIf(!isCallEnded && call.hasCapability(Call.Details.CAPABILITY_MANAGE_CONFERENCE))
+            setActionButtonEnabled(callSwap, enabled = !isCallEnded && state == Call.STATE_ACTIVE)
+            setActionButtonEnabled(callMerge, enabled = !isCallEnded && state == Call.STATE_ACTIVE)
         }
     }
 
@@ -666,7 +672,7 @@ class CallActivity : SimpleActivity() {
             updateCallState(phoneState.call)
             updateCallOnHoldState(null)
             val state = phoneState.call.getStateCompat()
-            val isSingleCallActionsEnabled = (state == Call.STATE_ACTIVE || state == Call.STATE_DISCONNECTED
+            val isSingleCallActionsEnabled = !isCallEnded && (state == Call.STATE_ACTIVE || state == Call.STATE_DISCONNECTED
                 || state == Call.STATE_DISCONNECTING || state == Call.STATE_HOLDING)
             setActionButtonEnabled(binding.callToggleHold, isSingleCallActionsEnabled)
             setActionButtonEnabled(binding.callAdd, isSingleCallActionsEnabled)
@@ -756,16 +762,19 @@ class CallActivity : SimpleActivity() {
         }
 
         isCallEnded = true
-        if (callDuration > 0) {
-            runOnUiThread {
+        runOnUiThread {
+            if (callDuration > 0) {
+                disableAllActionButtons()
+                @SuppressLint("SetTextI18n")
                 binding.callStatusLabel.text = "${callDuration.getFormattedDuration()} (${getString(R.string.call_ended)})"
-                Handler().postDelayed({
+                Handler(mainLooper).postDelayed(3000) {
                     finishAndRemoveTask()
-                }, 3000)
+                }
+            } else {
+                disableAllActionButtons()
+                binding.callStatusLabel.text = getString(R.string.call_ended)
+                finish()
             }
-        } else {
-            binding.callStatusLabel.text = getString(R.string.call_ended)
-            finish()
         }
     }
 
@@ -835,6 +844,14 @@ class CallActivity : SimpleActivity() {
         if (proximityWakeLock?.isHeld == true) {
             proximityWakeLock!!.release()
         }
+    }
+
+    private fun disableAllActionButtons() {
+        (binding.ongoingCallHolder.children + binding.callEnd)
+            .filter { it is ImageView && it.isVisible() }
+            .forEach { view ->
+                setActionButtonEnabled(button = view as ImageView, enabled = false)
+            }
     }
 
     private fun setActionButtonEnabled(button: ImageView, enabled: Boolean) {
